@@ -111,14 +111,12 @@ $demos.addEventListener("click", async (e) => {
     e.preventDefault();
     const file = $demo.getAttribute("href");
     render(html`<div class="text-center my-3">${loading}</div>`, $tablesContainer);
-    console.log("Context set before form render:", DB.context);
     await DB.upload(new File([await fetch(file).then((r) => r.blob())], file.split("/").pop()));
     const questions = JSON.parse($demo.dataset.questions);
     if (questions.length) {
       DB.questionInfo.schema = JSON.stringify(DB.schema());
       DB.questionInfo.questions = questions;
     }
-    console.log("Context after demo load:", DB.context);
     drawTables();
   }
 });
@@ -365,14 +363,10 @@ $tablesContainer.addEventListener("click", (e) => {
     $tablesContainer.querySelector('form button[type="submit"]').click();
   }
 });
-
-// Example: replace with actual implementation
 saveContextButton.addEventListener("click", () => {
   const context = contextInput.value.trim();
   if (context) {
-    console.log("Context:", context);
     valueFromModalBox.context = context;
-    console.log("Context saved:", valueFromModalBox.context);
     addContextModal.style.display = "none";
   } else {
     alert("Please enter some context.");
@@ -391,7 +385,6 @@ document.addEventListener("click", (event) => {
 
 $tablesContainer.addEventListener("submit", async (e) => {
   e.preventDefault();
-  console.log("Context before sending to query:", valueFromModalBox.context);
   const formData = new FormData(e.target);
   const query = formData.get("query");
   render(html`<div class="text-center my-3">${loading}</div>`, $sql);
