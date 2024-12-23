@@ -31,6 +31,10 @@ const loading = html`<div class="spinner-border" role="status">
 let latestQueryResult = [];
 let latestChart;
 
+const saveContextButton = document.getElementById("saveContext");
+const contextInput = document.getElementById("contextInput");
+const closeModalButton = document.querySelector(".close");
+const valueFromModalBox = {};
 // --------------------------------------------------------------------
 // Set up Markdown
 const marked = new Marked(
@@ -101,7 +105,6 @@ fetch("config.json")
       $demos
     );
   });
-
 $demos.addEventListener("click", async (e) => {
   const $demo = e.target.closest(".demo");
   if ($demo) {
@@ -114,7 +117,6 @@ $demos.addEventListener("click", async (e) => {
       DB.questionInfo.schema = JSON.stringify(DB.schema());
       DB.questionInfo.questions = questions;
     }
-    DB.context = JSON.parse($demo.dataset.context);
     drawTables();
   }
 });
@@ -309,11 +311,9 @@ async function drawTables() {
   `;
 
   const query = () => html`
+  <div class = "d-flex align-items-center justify-content-center">
+  <button id="addContextButton" class="btn btn-info mx-auto" type="button">Add Context</button></div>
     <form class="mt-4 narrative mx-auto">
-      <div class="mb-3">
-        <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
-        <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
-      </div>
       <div class="mb-3">
         <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
         <textarea class="form-control" name="query" id="query" rows="3"></textarea>
@@ -349,13 +349,37 @@ async function drawTables() {
 
 // --------------------------------------------------------------------
 // Handle chat
-
-$tablesContainer.addEventListener("click", async (e) => {
+$tablesContainer.addEventListener("click", (e) => {
   const $question = e.target.closest(".question");
+  const $addContextButton = e.target.closest("#addContextButton");
+
+  if($addContextButton){
+      addContextModal.style.display = "block";
+  }
+
   if ($question) {
     e.preventDefault();
     $tablesContainer.querySelector("#query").value = $question.textContent;
     $tablesContainer.querySelector('form button[type="submit"]').click();
+  }
+});
+saveContextButton.addEventListener("click", () => {
+  const context = contextInput.value.trim();
+  if (context) {
+    valueFromModalBox.context = context;
+    addContextModal.style.display = "none";
+  } else {
+    alert("Please enter some context.");
+  }
+});
+
+closeModalButton.addEventListener("click", () => {
+  addContextModal.style.display = "none";
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target === addContextModal) {
+    addContextModal.style.display = "none";
   }
 });
 
@@ -368,7 +392,7 @@ $tablesContainer.addEventListener("submit", async (e) => {
   const result = await llm({
     system: `You are an expert SQLite query writer. The user has a SQLite dataset.
 
-${DB.context}
+${valueFromModalBox.context}
 
 This is their SQLite schema:
 
@@ -543,7 +567,6 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
     }
   }
 });
-
 // --------------------------------------------------------------------
 // Function to download CSV file
 function download(content, filename, type) {
