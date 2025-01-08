@@ -123,6 +123,7 @@ $demos.addEventListener("click", async (e) => {
 // Manage database tables
 const db = new sqlite3.oo1.DB(defaultDB, "c");
 const DB = {
+  context: "",
   schema: function () {
     let tables = [];
     db.exec("SELECT name, sql FROM sqlite_master WHERE type='table'", { rowMode: "object" }).forEach((table) => {
@@ -321,10 +322,12 @@ async function drawTables() {
       <button type="submit" class="btn btn-primary">Submit</button>
     </form>
   `;
-
   render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, query()] : [])], $tablesContainer);
   if (!schema.length) return;
-
+  const contextInput = document.getElementById("context");
+  contextInput.addEventListener("input", (e) => {
+  DB.context = e.target.value; // Update DB.context with the current value of the textarea
+  });
   const $query = $tablesContainer.querySelector("#query");
   $query.scrollIntoView({ behavior: "smooth", block: "center" });
   $query.focus();
@@ -358,7 +361,6 @@ $tablesContainer.addEventListener("click", async (e) => {
     $tablesContainer.querySelector('form button[type="submit"]').click();
   }
 });
-
 $tablesContainer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
@@ -380,7 +382,8 @@ Answer the user's question following these steps:
 
 1. Guess their objective in asking this.
 2. Describe the steps to achieve this objective in SQL.
-3. Write SQL to answer the question. Use SQLite sytax.
+3. Build the logic for the SQL query by identifying the necessary tables and relationships. Select the appropriate columns based on the user's question and the dataset.
+4. Write SQL to answer the question. Use SQLite syntax.
 
 Replace generic filter values (e.g. "a location", "specific region", etc.) by querying a random value from data.
 Always use [Table].[Column].
@@ -555,3 +558,4 @@ function download(content, filename, type) {
   link.click();
   URL.revokeObjectURL(url);
 }
+
