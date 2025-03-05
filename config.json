@@ -85,6 +85,23 @@
         "What is the average maximum speed of all characters listed?",
         "Which character has the widest range between minimum and maximum energy projection?"
       ]
+    },
+    {
+      "title": "EHR Data",
+      "body": "Electronic Health Records covering patient demographics, clinical metrics, comorbidities, medications, etc. over time",
+      "file": "https://raw.githubusercontent.com/gramener/datasets/refs/heads/main/ehr.csv",
+      "questions": [
+        "What is the average age of patients in the dataset?",
+        "Which comorbidity is the most common among patients?",
+        "What is the distribution of medication prescriptions by category?",
+        "How many unique patients are recorded in the dataset?",
+        "What is the trend of patient visits over time?",
+        "Which clinical metric shows the highest variance among patients?",
+        "How many patients have been prescribed more than five different medications?",
+        "What is the correlation between BMI and blood pressure levels?",
+        "Which age group has the highest incidence of diabetes?",
+        "How many patients have been admitted more than once within a year?"
+      ]
     }
   ]
 }
