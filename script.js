@@ -7,6 +7,7 @@ import { Marked } from "https://cdn.jsdelivr.net/npm/marked@13/+esm";
 import { markedHighlight } from "https://cdn.jsdelivr.net/npm/marked-highlight@2/+esm";
 import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";
 import { Chart, registerables } from "https://cdn.jsdelivr.net/npm/chart.js@4/+esm";
+import { asyncLLM } from "https://cdn.jsdelivr.net/npm/asyncllm@2";
 
 // Initialize SQLite
 const defaultDB = "@";
@@ -30,6 +31,11 @@ const loading = html`<div class="spinner-border" role="status">
 
 let latestQueryResult = [];
 let latestChart;
+// Add state variables for query tracking
+let chatHistory = [];
+let mostRecentQuestion = '';
+let mostRecentSql = '';
+let mostRecentExplanation = '';
 
 // --------------------------------------------------------------------
 // Set up Markdown
@@ -138,7 +144,7 @@ const DB = {
   questionInfo: {},
   questions: async function () {
     if (DB.questionInfo.schema !== JSON.stringify(DB.schema())) {
-      const response = await llm({
+      const response = await llmquestion({
         system: "Suggest 5 diverse, useful questions that a user can answer from this dataset using SQLite",
         user: DB.schema()
           .map(({ sql }) => sql)
@@ -151,7 +157,7 @@ const DB = {
         },
       });
       if (response.error) DB.questionInfo.error = response.error;
-      else DB.questionInfo.questions = response.questions;
+      else DB.questionInfo.questions = JSON.parse(response).questions;
       DB.questionInfo.schema = JSON.stringify(DB.schema());
     }
     return DB.questionInfo;
@@ -325,7 +331,7 @@ async function drawTables() {
         <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
         <textarea class="form-control" name="query" id="query" rows="3"></textarea>
       </div>
-      <button type="submit" class="btn btn-primary">Submit</button>
+      <button id="first_submit" type="submit" class="btn btn-primary">Submit</button>
     </form>
   `;
 
@@ -363,6 +369,7 @@ $tablesContainer.addEventListener("click", async (e) => {
     e.preventDefault();
     $tablesContainer.querySelector("#query").value = $question.textContent;
     $tablesContainer.querySelector('form button[type="submit"]').click();
+    document.getElementById("first_submit").remove();
   }
 });
 
@@ -370,7 +377,9 @@ $tablesContainer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
   const query = formData.get("query");
-  render(html`<div class="text-center my-3">${loading}</div>`, $sql);
+  mostRecentQuestion = query;  // Store as most recent instead of previous
+  
+  render(html``, $sql); // Don't show loading state for SQL section
   render(html``, $result);
   const result = await llm({
     system: `You are an expert SQLite query writer. The user has a SQLite dataset.
@@ -395,112 +404,56 @@ Always use [Table].[Column].
 `,
     user: query,
   });
-  render(html`${unsafeHTML(marked.parse(result))}`, $sql);
-
-  // Extract everything inside {lang?}...```
+  
+  mostRecentExplanation = result;  // Store as most recent
+  // Extract and display only the SQL part
   const sql = result.match(/```.*?\n(.*?)```/s)?.[1] ?? result;
+  mostRecentSql = sql;  // Store as most recent
+
   try {
     const data = db.exec(sql, { rowMode: "object" });
+    latestQueryResult=data
 
-    // Render the data using the utility function
-    if (data.length > 0) {
-      latestQueryResult = data;
-      const actions = html`
-        <div class="row align-items-center g-2">
-          <div class="col-auto">
-            <button id="download-button" type="button" class="btn btn-primary">
-              <i class="bi bi-filetype-csv"></i>
-              Download CSV
-            </button>
-          </div>
-          <div class="col">
-            <input
-              type="text"
-              id="chart-input"
-              name="chart-input"
-              class="form-control"
-              placeholder="Describe what you want to chart"
-              value="Draw the most appropriate chart to visualize this data"
-            />
-          </div>
-          <div class="col-auto">
-            <button id="chart-button" type="button" class="btn btn-primary">
-              <i class="bi bi-bar-chart-line"></i>
-              Draw Chart
-            </button>
-          </div>
+      const formattedResult = await llm({
+        system: `Format the following raw answer into a well-structured, human-readable response based on the given question. 
+                Ensure the response is clear, concise, and appropriately detailed—neither too short nor overly verbose. 
+                Preserve all relevant information while improving readability. 
+                The response should feel natural and professional.`,
+        user: `The query: ${query}\n\nThe raw answer is given below:\n\n${JSON.stringify(data, null, 2)}`,
+        data:data,
+        format:true
+      });
+
+      chatHistory.push({
+        question: query,
+        sql: sql,
+        explanation: result,
+        formattedResult: formattedResult,
+        data: data
+      });
+} catch (e) {
+  const container=document.getElementById("result");
+
+  let childnode=`<div class="mt-3">
+      <div class="alert alert-danger">${e.message}</div>
+      <button id="not-satisfied-button" class="btn btn-warning">submit</button>
+      <div id="improvement-container" class="mt-3 d-none">
+        <div class="form-group">
+          <label for="improvement-input">Unable to process please provide extra context</label>
+          <textarea class="form-control" id="improvement-input" rows="3"></textarea>
         </div>
-      `;
-      const tableHtml = renderTable(data.slice(0, 100));
-      render([actions, tableHtml], $result);
-    } else {
-      render(html`<p>No results found.</p>`, $result);
-    }
-  } catch (e) {
-    render(html`<div class="alert alert-danger">${e.message}</div>`, $result);
+        <button id="submit-improvement" class="btn btn-primary mt-2">Submit Improvement</button>
+      </div>
+    </div>`
+
+    container.insertAdjacentHTML('beforeend', childnode);
+
     console.error(e);
   }
 });
-
-// --------------------------------------------------------------------
-// Utilities
-
-function notify(cls, title, message) {
-  $toast.querySelector(".toast-title").textContent = title;
-  $toast.querySelector(".toast-body").textContent = message;
-  const $toastHeader = $toast.querySelector(".toast-header");
-  $toastHeader.classList.remove("text-bg-success", "text-bg-danger", "text-bg-warning", "text-bg-info");
-  $toastHeader.classList.add(`text-bg-${cls}`);
-  toast.show();
-}
-
-async function llm({ system, user, schema }) {
-  const response = await fetch("https://llmfoundry.straive.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0,
-      ...(schema ? { response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema } } } : {}),
-    }),
-  }).then((r) => r.json());
-  if (response.error) return response;
-  const content = response.choices?.[0]?.message?.content;
-  try {
-    return schema ? JSON.parse(content) : content;
-  } catch (e) {
-    return { error: e };
-  }
-}
-
-// Utility function to render a table
-function renderTable(data) {
-  const columns = Object.keys(data[0]);
-  return html`
-    <table class="table table-striped table-hover">
-      <thead>
-        <tr>
-          ${columns.map((col) => html`<th>${col}</th>`)}
-        </tr>
-      </thead>
-      <tbody>
-        ${data.map(
-          (row) => html`
-            <tr>
-              ${columns.map((col) => html`<td>${row[col]}</td>`)}
-            </tr>
-          `,
-        )}
-      </tbody>
-    </table>
-  `;
-}
-
+// Add event listeners for the new buttons
 $result.addEventListener("click", async (e) => {
+  // Existing event listeners for download and chart
   const $downloadButton = e.target.closest("#download-button");
   if ($downloadButton && latestQueryResult.length > 0) {
     download(dsvFormat(",").format(latestQueryResult), "datachat.csv", "text/csv");
@@ -533,7 +486,7 @@ data = ${JSON.stringify(latestQueryResult.slice(0, 3))}
 IMPORTANT: ${$result.querySelector("#chart-input").value}
 `;
     render(loading, $chartCode);
-    const result = await llm({ system, user });
+    const result = await llmquestion({ system, user });
     render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);
     const code = result.match(/```js\n(.*?)\n```/s)?.[1];
     if (!code) {
@@ -550,8 +503,274 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
       console.error(error);
     }
   }
-});
 
+  // Add handlers for Not Satisfied functionality
+  if (e.target.id === "not-satisfied-button") {
+    const not_satisfy_button=document.getElementById("not-satisfied-button");
+    not_satisfy_button.remove()
+    const container = document.getElementById("improvement-container");
+    container.classList.remove("d-none");
+  }
+  if (e.target.id === "submit-improvement") {
+    const improvementInput = document.getElementById("improvement-input");
+    const userDescription = improvementInput.value;
+    const container = document.getElementById("improvement-container");
+    
+    if (!userDescription.trim()) {
+      notify("warning", "Input Required", "Please describe how you want to improve the answer");
+      return;
+    }
+
+    container.remove()
+
+    render(html`<div class="text-center my-3">${loading}</div>`, $sql);
+    
+    // Get the most recent chat entry
+    const lastChat = chatHistory[chatHistory.length - 1];
+
+    // Call LLM with most recent context from chat history
+    const result = await llm({
+      system: `You are an expert SQLite query writer. You need to improve a previous query based on user feedback.
+Previous question: ${lastChat.question}
+Previous SQL: ${lastChat.sql}
+Previous explanation: ${lastChat.explanation}
+schema of database is:${DB.schema()
+  .map(({ sql }) => sql)
+  .join("\n\n")}
+
+Generate an improved query based on the user's new requirements.
+Explain the changes you're making and why, then provide the new SQL query.`,
+      user: userDescription
+    });
+
+    const newSql = result.match(/```.*?\n(.*?)```/s)?.[1] ?? result;
+    
+    try {
+      const data = db.exec(newSql, { rowMode: "object" });
+      latestQueryResult=data;
+        
+        // Get new formatted results using the last chat entry for context
+        const formattedResult = await llm({
+          system: `Format the following raw answer into a well-structured, human-readable response.
+                   Previous question: ${lastChat.question}
+                   Current improvement request: ${userDescription}`,
+          user: `The raw answer is given below:\n\n${JSON.stringify(data, null, 2)}`,
+          data:data,
+          format:true
+        });
+
+        // Add to chat history
+        chatHistory.push({
+          question: userDescription,
+          sql: newSql,
+          explanation: result,
+          formattedResult: formattedResult,
+          data: data
+        });
+
+        render(html``, $sql);
+
+    } catch (e) {
+      
+      const container=document.getElementById("result");
+
+     let childnode=`<div class="mt-3">
+        <div class="alert alert-danger">${e.message}</div>
+        <button id="not-satisfied-button" class="btn btn-warning">submit</button>
+        <div id="improvement-container" class="mt-3 d-none">
+          <div class="form-group">
+            <label for="improvement-input">Unable to process please provide extra context</label>
+            <textarea class="form-control" id="improvement-input" rows="3"></textarea>
+          </div>
+          <button id="submit-improvement" class="btn btn-primary mt-2">Submit Improvement</button>
+        </div>
+      </div>`
+
+    container.insertAdjacentHTML('beforeend', childnode);
+  render(html``,$sql)
+    }
+  }
+});
+// --------------------------------------------------------------------
+// Utilities
+function notify(cls, title, message) {
+  $toast.querySelector(".toast-title").textContent = title;
+  $toast.querySelector(".toast-body").textContent = message;
+  const $toastHeader = $toast.querySelector(".toast-header");
+  $toastHeader.classList.remove("text-bg-success", "text-bg-danger", "text-bg-warning", "text-bg-info");
+  $toastHeader.classList.add(`text-bg-${cls}`);
+  toast.show();
+}
+
+
+async function llmquestion({system,user, schema}){
+  const body = {
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0,
+    ...(schema
+      ? {
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "response", strict: true, schema },
+          },
+        }
+      : {}),
+    stream: true,
+  };
+
+  let currentChunk = "";
+
+  try {
+    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}:datachat`,
+      },
+      body: JSON.stringify(body),
+    })) {
+      if (data.error) {
+        console.error("API Error:", data.error);
+        throw new Error(data.error.message || "LLM API Error");
+      }
+
+      if (data.content) {
+        currentChunk =data.content;
+      }
+}
+return currentChunk;
+  }catch{
+    console.log("LLm Error")
+  }
+}
+
+async function llm({ system, user, schema,data=[] , format=false}) {
+
+    const actions = `
+          <div class="row align-items-center g-2">
+            <div class="col-auto">
+              <button id="download-button" type="button" class="btn btn-primary">
+                <i class="bi bi-filetype-csv"></i>
+                Download CSV
+              </button>
+            </div>
+            <div class="col">
+              <input
+                type="text"
+                id="chart-input"
+                name="chart-input"
+                class="form-control"
+                placeholder="Describe what you want to chart"
+                value="Draw the most appropriate chart to visualize this data"
+              />
+            </div>
+            <div class="col-auto">
+              <button id="chart-button" type="button" class="btn btn-primary">
+                <i class="bi bi-bar-chart-line"></i>
+                Draw Chart
+              </button>
+            </div>
+          </div>
+        `;
+    let parentnode=document.getElementById("result");
+    let childnode=`<div class="card mb-3 chat-history">
+                </div>
+                `
+    parentnode.insertAdjacentHTML('beforeend', childnode);
+    let lastelement=parentnode.lastElementChild;
+  const body = {
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0,
+    ...(schema
+      ? {
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "response", strict: true, schema },
+          },
+        }
+      : {}),
+    stream: true,
+  };
+
+  let currentChunk = "";
+
+  try {
+    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}:datachat`,
+      },
+      body: JSON.stringify(body),
+    })) {
+      if (data.error) {
+        console.error("API Error:", data.error);
+        throw new Error(data.error.message || "LLM API Error");
+      }
+
+      if (data.content) {
+        currentChunk =data.content;
+      }
+     lastelement.innerHTML=`<div class="card-header mb-2">
+                <strong>${format?"Result ":"Question: "} </strong> ${format?"":user}
+              </div>
+              <div id="chat" class="mb-3 p-4">
+              ${(marked.parse(currentChunk))}
+              </div>`
+    }
+    if (format){
+        let tableHtml=data.length>0?renderTable(data.slice(0, 100)):``;
+        lastelement.innerHTML+=(actions+tableHtml);  
+    }
+    return currentChunk;
+  } catch (error) {
+    return { error };
+  }
+  finally {
+    let notSatisfy=`<div class="mt-3">
+    <button id="not-satisfied-button" class="btn btn-warning">Not Satisfied with Answer</button>
+    <div id="improvement-container" class="mt-3 d-none">
+      <div class="form-group">
+        <label for="improvement-input">How would you like to improve the answer?</label>
+        <textarea class="form-control" id="improvement-input" rows="3"></textarea>
+      </div>
+      <button id="submit-improvement" class="btn btn-primary mt-2">Submit Improvement</button>
+    </div>
+  </div>`
+    if (format){
+    parentnode.innerHTML+=(notSatisfy)
+  }
+  }
+}
+
+// Utility function to render a table
+function renderTable(data) {
+    const columns = Object.keys(data[0]);
+    return `
+      <table class="table table-striped table-hover">
+        <thead>
+          <tr>
+            ${columns.map((col) => `<th>${col}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${data .map( (row) => `
+              <tr>
+                ${columns.map((col) => `<td>${row[col]}</td>`).join('')}
+              </tr>
+            ` ).join('')}
+        </tbody>
+      </table>
+    `;
+  }
 // --------------------------------------------------------------------
 // Function to download CSV file
 function download(content, filename, type) {
