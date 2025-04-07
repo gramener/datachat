@@ -463,7 +463,8 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
 `;
     render(loading, $chartCode);
     const result = await llm({ system, user, streaming: false });
-    render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);
+    // render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);
+    render(``, $chartCode);
     const code = result.match(/```js\n(.*?)\n```/s)?.[1];
     if (!code) {
       notify("danger", "Error", "Could not generate chart code");
@@ -495,10 +496,11 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
       notify("warning", "Input Required", "Please describe how you want to improve the answer");
       return;
     }
+    document.getElementById("action").remove();
 
     container.remove();
 
-    render(html`<div class="text-center my-3">${loading}</div>`, $sql);
+    render(loading, $sql);
     // Get the most recent chat entry
     const lastChat = chatHistory[chatHistory.length - 1];
     // Call LLM with most recent context from chat history
@@ -575,7 +577,7 @@ function notify(cls, title, message) {
 async function llm({ system, user, schema, data = [], format = false, streaming = true }) {
   let errormessage = "";
   const actions = `
-          <div class="row align-items-center g-2">
+          <div  id="action" class="row align-items-center g-2">
             <div class="col-auto">
               <button id="download-button" type="button" class="btn btn-primary">
                 <i class="bi bi-filetype-csv"></i>
