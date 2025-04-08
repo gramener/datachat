@@ -375,6 +375,7 @@ $tablesContainer.addEventListener("submit", async (e) => {
   const query = formData.get("query");
   render(html``, $sql);
   render(html``, $result);
+  document.getElementById("first_submit").remove();
   const result = await llm({
     system: `You are an expert SQLite query writer. The user has a SQLite dataset.
 
