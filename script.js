@@ -150,9 +150,10 @@ const DB = {
           required: ["questions"],
           additionalProperties: false,
         },
+        streaming: false,
       });
       if (response.error) DB.questionInfo.error = response.error;
-      else DB.questionInfo.questions = response.questions;
+      else DB.questionInfo.questions = JSON.parse(response).questions;
       DB.questionInfo.schema = JSON.stringify(DB.schema());
     }
     return DB.questionInfo;
@@ -397,7 +398,6 @@ Always use [Table].[Column].
 `,
     user: query,
   });
-  render(html`${unsafeHTML(marked.parse(result))}`, $sql);
 
   // Extract everything inside {lang?}...```
   const sql = result.match(/```.*?\n(.*?)```/s)?.[1] ?? result;
@@ -436,29 +436,54 @@ function notify(cls, title, message) {
   $toastHeader.classList.add(`text-bg-${cls}`);
   toast.show();
 }
-
 async function llm({ system, user, schema, format = false, data = [], streaming = true }) {
   let errormessage = "";
+  render(loading, $loading);
 
-  const response = await fetch("https://llmfoundry.straive.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0,
-      ...(schema ? { response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema } } } : {}),
-    }),
-  }).then((r) => r.json());
-  if (response.error) return response;
-  const content = response.choices?.[0]?.message?.content;
+  let parentnode = document.getElementById("result");
+  let childnode = `<div class="card mb-3 chat-history"></div>`;
+  streaming ? parentnode.insertAdjacentHTML("beforeend", childnode) : "";
+  let lastelement = parentnode.lastElementChild;
+  let currentChunk = "";
   try {
-    return schema ? JSON.parse(content) : content;
+    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        temperature: 0,
+        ...(schema ? { response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema } } } : {}),
+        stream: true,
+      }),
+    })) {
+      if (data.error) {
+        throw new Error(data.error.message || "LLM API Error");
+      }
+
+      if (data.content) {
+        render(html``, $loading);
+        currentChunk = data.content;
+      }
+      streaming
+        ? (lastelement.innerHTML = `<div class="card-header mb-2">
+              <strong>${format ? "Result " : "Question: "} </strong> ${format ? "" : user}
+            </div>
+            <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>`)
+        : "";
+    }
+    if (streaming && format) {
+      let tableHtml = data.length > 0 ? renderTable(data.slice(0, 100)) : ``;
+      lastelement.innerHTML += actions + tableHtml;
+    }
+    return currentChunk;
   } catch (e) {
-    return { error: e };
+    errormessage = e.message;
+  } finally {
+    format ? (parentnode.innerHTML += get_node_when_error(errormessage)) : "";
   }
 }
 
@@ -466,17 +491,17 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
 function renderTable(data) {
   const columns = Object.keys(data[0]);
   return `
-    <table class="table table-striped table-hover">
-      <thead>
-        <tr>
-          ${columns.map((col) => `<th>${col}</th>`).join("")}
-        </tr>
-      </thead>
-      <tbody>
+      <table class="table table-striped table-hover">
+        <thead>
+          <tr>
+            ${columns.map((col) => `<th>${col}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
         ${data.map((row) => `<tr>${columns.map((col) => `<td>${row[col]}</td>`).join("")}</tr>`).join("")}
-      </tbody>
-    </table>
-  `;
+        </tbody>
+      </table>
+    `;
 }
 
 $result.addEventListener("click", async (e) => {
@@ -513,6 +538,7 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
 `;
     render(loading, $chartCode);
     const result = await llm({ system, user, streaming: false });
+    render(html``, $chartCode);
     // render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);//not showing code behind the chart
     const code = result.match(/```js\n(.*?)\n```/s)?.[1];
     if (!code) {
@@ -543,6 +569,7 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
     }
     document.getElementById("action").remove();
     document.getElementById("improvement-container").remove();
+    if (latestChart) latestChart.destroy();
     render(loading, $loading);
 
     const lastChat = chatHistory[chatHistory.length - 1];
