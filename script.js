@@ -7,6 +7,7 @@ import { Marked } from "https://cdn.jsdelivr.net/npm/marked@13/+esm";
 import { markedHighlight } from "https://cdn.jsdelivr.net/npm/marked-highlight@2/+esm";
 import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";
 import { Chart, registerables } from "https://cdn.jsdelivr.net/npm/chart.js@4/+esm";
+import { asyncLLM } from "https://cdn.jsdelivr.net/npm/asyncllm@2";
 
 // Initialize SQLite
 const defaultDB = "@";
@@ -27,10 +28,11 @@ const toast = new bootstrap.Toast($toast);
 const loading = html`<div class="spinner-border" role="status">
   <span class="visually-hidden">Loading...</span>
 </div>`;
+const $loading = document.getElementById("loading");
 
 let latestQueryResult = [];
 let latestChart;
-
+let chatHistory = [];
 // --------------------------------------------------------------------
 // Set up Markdown
 const marked = new Marked(
@@ -40,7 +42,7 @@ const marked = new Marked(
       const language = hljs.getLanguage(lang) ? lang : "plaintext";
       return hljs.highlight(code, { language }).value;
     },
-  }),
+  })
 );
 
 marked.use({
@@ -71,7 +73,7 @@ render(
         </div>
       `
     : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
-  $upload,
+  $upload
 );
 
 // --------------------------------------------------------------------
@@ -96,9 +98,9 @@ fetch("config.json")
                 <p class="card-text">${body}</p>
               </div>
             </a>
-          </div>`,
+          </div>`
       ),
-      $demos,
+      $demos
     );
   });
 
@@ -218,7 +220,7 @@ const DB = {
         else if (typeof sampleValue === "boolean") sqlType = "INTEGER"; // SQLite has no boolean
         else if (sampleValue instanceof Date) sqlType = "TEXT"; // Store dates as TEXT
         return [col, sqlType];
-      }),
+      })
     );
     const createTableSQL = `CREATE TABLE IF NOT EXISTS ${tableName} (${cols.map((col) => `[${col}] ${typeMap[col]}`).join(", ")})`;
     db.exec(createTableSQL);
@@ -233,7 +235,7 @@ const DB = {
           cols.map((col) => {
             const value = row[col];
             return value instanceof Date ? value.toISOString() : value;
-          }),
+          })
         )
         .stepReset();
     }
@@ -302,7 +304,7 @@ async function drawTables() {
                           <td>${column.dflt_value ?? "NULL"}</td>
                           <td>${column.pk ? "Yes" : "No"}</td>
                         </tr>
-                      `,
+                      `
                     )}
                   </tbody>
                 </table>
@@ -310,7 +312,7 @@ async function drawTables() {
             </div>
           </div>
         </div>
-      `,
+      `
       )}
     </div>
   `;
@@ -325,7 +327,7 @@ async function drawTables() {
         <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
         <textarea class="form-control" name="query" id="query" rows="3"></textarea>
       </div>
-      <button type="submit" class="btn btn-primary">Submit</button>
+      <button id="first_submit" type="submit" class="btn btn-primary">Submit</button>
     </form>
   `;
 
@@ -348,7 +350,7 @@ async function drawTables() {
         </div>`,
         query(),
       ],
-      $tablesContainer,
+      $tablesContainer
     );
     $query.focus();
   });
@@ -363,6 +365,7 @@ $tablesContainer.addEventListener("click", async (e) => {
     e.preventDefault();
     $tablesContainer.querySelector("#query").value = $question.textContent;
     $tablesContainer.querySelector('form button[type="submit"]').click();
+    document.getElementById("first_submit").remove();
   }
 });
 
@@ -405,7 +408,7 @@ Always use [Table].[Column].
     // Render the data using the utility function
     if (data.length > 0) {
       latestQueryResult = data;
-      const actions = html`
+      const actions = `
         <div class="row align-items-center g-2">
           <div class="col-auto">
             <button id="download-button" type="button" class="btn btn-primary">
@@ -454,7 +457,7 @@ function notify(cls, title, message) {
   toast.show();
 }
 
-async function llm({ system, user, schema }) {
+async function llm({ system, user, schema, format = false, data = [], streaming = true }) {
   const response = await fetch("https://llmfoundry.straive.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
@@ -493,7 +496,7 @@ function renderTable(data) {
             <tr>
               ${columns.map((col) => html`<td>${row[col]}</td>`)}
             </tr>
-          `,
+          `
         )}
       </tbody>
     </table>
@@ -533,8 +536,8 @@ data = ${JSON.stringify(latestQueryResult.slice(0, 3))}
 IMPORTANT: ${$result.querySelector("#chart-input").value}
 `;
     render(loading, $chartCode);
-    const result = await llm({ system, user });
-    render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);
+    const result = await llm({ system, user, streaming: false });
+    // render(html`${unsafeHTML(marked.parse(result))}`, $chartCode);//not showing code behind the chart
     const code = result.match(/```js\n(.*?)\n```/s)?.[1];
     if (!code) {
       notify("danger", "Error", "Could not generate chart code");
@@ -550,6 +553,61 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
       console.error(error);
     }
   }
+
+  if (e.target.id === "not-satisfied-button") {
+    document.getElementById("not-satisfied-button").remove();
+    document.getElementById("improvement-container").classList.remove("d-none");
+  }
+  if (e.target.id === "submit-improvement") {
+    const userDescription = document.getElementById("improvement-input").value;
+
+    if (!userDescription.trim()) {
+      notify("warning", "Input Required", "Please describe how you want to improve the answer");
+      return;
+    }
+    document.getElementById("action").remove();
+    document.getElementById("improvement-container").remove();
+
+    render(loading, $loading);
+
+    const lastChat = chatHistory[chatHistory.length - 1];
+
+    const result = await llm({
+      system: `You are an expert SQLite query writer. You need to improve a previous query based on user feedback.
+Previous question: ${lastChat.question}
+Previous SQL: ${lastChat.sql}
+Previous explanation: ${lastChat.explanation}
+schema of database is:${DB.schema()
+        .map(({ sql }) => sql)
+        .join("\n\n")}
+
+Generate an improved query based on the user's new requirements.
+Explain the changes you're making and why, then provide the new SQL query.`,
+      user: userDescription,
+    });
+
+    const newSql = result.match(/```.*?\n(.*?)```/s)?.[1] ?? result;
+
+    try {
+      const data = db.exec(newSql, { rowMode: "object" });
+      latestQueryResult = data;
+      // Get new formatted results using the last chat entry for context
+      const formattedResult = await llm({
+        system: `Format the following raw answer into a well-structured, human-readable response.
+                   Previous question: ${lastChat.question}
+                   Current improvement request: ${userDescription}`,
+        user: `The raw answer is given below:\n\n${JSON.stringify(data, null, 2)}`,
+        data: data,
+        format: true,
+      });
+      // Add to chat history
+      chatHistory.push({ question: userDescription, sql: newSql, explanation: result, formattedResult: formattedResult, data: data });
+      render(html``, $loading);
+    } catch (e) {
+      document.getElementById("result").insertAdjacentHTML("beforeend", get_node_when_error(e.message));
+      render(html``, $loading);
+    }
+  }
 });
 
 // --------------------------------------------------------------------
@@ -562,4 +620,19 @@ function download(content, filename, type) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function get_node_when_error(e) {
+  let childnode = `<div class="mt-3">
+  ${e.length > 0 ? `<div class="alert alert-danger">${e}</div>` : ""}
+  <button id="not-satisfied-button" class="btn btn-warning">not satisfied</button>
+  <div id="improvement-container" class="mt-3 d-none">
+    <div class="form-group">
+      <label for="improvement-input">Unable to process please provide extra context</label>
+      <textarea class="form-control" id="improvement-input" rows="3"></textarea>
+    </div>
+    <button id="submit-improvement" class="btn btn-primary mt-2">Submit Improvement</button>
+  </div>
+</div>`;
+  return childnode;
 }
