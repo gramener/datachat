@@ -31,6 +31,7 @@ const loading = html`<div class="spinner-border" role="status">
 
 let latestQueryResult = [];
 let latestChart;
+let chatHistory = [];
 
 // --------------------------------------------------------------------
 // Set up Markdown
@@ -69,9 +70,9 @@ render(
         <div class="mb-3">
           <label for="file" class="form-label">Upload CSV (<code>.csv</code>) or SQLite databases (<code>.sqlite3</code>, <code>.db</code>)</label>
           <input class="form-control" type="file" id="file" name="file" accept=".csv,.sqlite3,.db,.sqlite,.s3db,.sl3" multiple />
-        </div>
+          </div>
       `
-    : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
+      : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
   $upload,
 );
 
@@ -316,22 +317,7 @@ async function drawTables() {
       )}
     </div>
   `;
-
-  const query = () => html`
-    <form class="mt-4 narrative mx-auto">
-      <div class="mb-3">
-        <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
-        <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
-      </div>
-      <div class="mb-3">
-        <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
-        <textarea class="form-control" name="query" id="query" rows="3"></textarea>
-      </div>
-      <button type="submit" class="btn btn-primary">Submit</button>
-    </form>
-  `;
-
-  render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, query()] : [])], $tablesContainer);
+  render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, queryhtml] : [])], $tablesContainer);
   if (!schema.length) return;
 
   const $query = $tablesContainer.querySelector("#query");
@@ -345,10 +331,10 @@ async function drawTables() {
         html`<div class="mx-auto narrative my-3">
           <h2 class="h6">Sample questions</h2>
           <ul>
-            ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
+          ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
           </ul>
         </div>`,
-        query(),
+        queryhtml,
       ],
       $tablesContainer,
     );
@@ -368,7 +354,10 @@ $tablesContainer.addEventListener("click", async (e) => {
   }
 });
 
-$tablesContainer.addEventListener("submit", async (e) => {
+$tablesContainer.addEventListener("submit", handlesubmit);
+$result.addEventListener("submit",handlesubmit);
+
+async function handlesubmit (e) {
   e.preventDefault();
   const formData = new FormData(e.target);
   const query = formData.get("query");
@@ -404,6 +393,11 @@ Always use [Table].[Column].
 
     // Render the data using the utility function
     if (data.length > 0) {
+      const formattedResult = await llm({
+        system: `Format the following raw answer into a well-structured, human-readable response based on the given question. Ensure the response is clear, concise, and appropriately detailed—neither too short nor overly verbose. Preserve all relevant information while improving readability. The response should feel natural and professional.`,
+        user: `The query: ${query}\n\nThe raw answer is given below:\n\n${JSON.stringify(data, null, 2)}`,
+        format: true,
+      });
       latestQueryResult = data;
       const actions = html`
         <div class="row align-items-center g-2">
@@ -432,15 +426,15 @@ Always use [Table].[Column].
         </div>
       `;
       const tableHtml = renderTable(data.slice(0, 100));
-      render([actions, tableHtml], $result);
+      render([actions, tableHtml, queryhtml], $result);
     } else {
-      render(html`<p>No results found.</p>`, $result);
+      render([html`<p>No results found.</p>`,queryhtml], $result);
     }
   } catch (e) {
-    render(html`<div class="alert alert-danger">${e.message}</div>`, $result);
+    render([html`<div class="alert alert-danger">${e.message}</div>`,queryhtml], $result);
     console.error(e);
   }
-});
+};
 
 // --------------------------------------------------------------------
 // Utilities
@@ -454,13 +448,14 @@ function notify(cls, title, message) {
   toast.show();
 }
 
-async function llm({ system, user, schema, format = false, streaming = true }) {
+async function llm({ system, user, schema, format = false, data = [], streaming = true }) {
+  let errormessage = "";
   let childnode = `<div class="card mb-3 chat-history"></div>`;
-  if(streaming) $sql.insertAdjacentHTML("beforeend", childnode);
-  if(streaming) render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild );
+  streaming ? $sql.insertAdjacentHTML("beforeend", childnode) : "";
+  streaming ? render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ):"";
   let currentChunk = "";
   try {
-    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
+  for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
       body: JSON.stringify({
@@ -474,19 +469,22 @@ async function llm({ system, user, schema, format = false, streaming = true }) {
         stream: true,
       }),
     },
-  )){
-    if (data.error) throw new Error(data.error.message || "LLM API Error");
-    if (data.content) currentChunk = data.content;
-    
-    if (streaming)  ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
+  )) {
+    if (data.error) {
+      throw new Error(data.error.message || "LLM API Error");
+    }
+    if (data.content) {
+      currentChunk = data.content;
+    }
+    streaming ? ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
               <strong>${ format ? "Result " : "Question: " } </strong> ${ format ? "" : user }
-              <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>
-            </div>`);          
+            </div>
+            <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>`) : "";
   }
   return currentChunk;
-  } catch (e) {
-    return { error: e };
-  }
+    } catch (e) {
+      return { error: e };
+    } 
 }
 
 // Utility function to render a table
@@ -563,7 +561,6 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
     }
   }
 });
-
 // --------------------------------------------------------------------
 // Function to download CSV file
 function download(content, filename, type) {
@@ -575,3 +572,17 @@ function download(content, filename, type) {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+const queryhtml =  html`
+      <form class="mt-4 narrative mx-auto">
+        <div class="mb-3">
+          <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
+          <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
+        </div>
+        <div class="mb-3">
+          <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
+          <textarea class="form-control" name="query" id="query" rows="3"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Submit</button>
+      </form>
+    `;
