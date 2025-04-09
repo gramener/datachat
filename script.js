@@ -485,7 +485,7 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
             </div>`): "";          
   }
   return currentChunk;
-  }catch (e) {
+  } catch (e) {
     return { error: e };
   } 
 }
