@@ -330,7 +330,7 @@ async function drawTables() {
         html`<div class="mx-auto narrative my-3">
           <h2 class="h6">Sample questions</h2>
           <ul>
-        ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
+            ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
           </ul>
         </div>`,
         queryhtml,
@@ -479,7 +479,7 @@ async function llm({ system, user, schema, format = false, streaming = true }) {
   return currentChunk;
   } catch (e) {
     return { error: e };
-  } 
+  }
 }
 
 // Utility function to render a table
