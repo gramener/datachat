@@ -454,7 +454,7 @@ function notify(cls, title, message) {
   toast.show();
 }
 
-async function llm({ system, user, schema, format = false, data = [], streaming = true }) {
+async function llm({ system, user, schema, format = false, streaming = true }) {
   let childnode = `<div class="card mb-3 chat-history"></div>`;
   streaming ? $sql.insertAdjacentHTML("beforeend", childnode) : "";
   streaming ? render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ):"";
