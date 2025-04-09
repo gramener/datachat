@@ -31,7 +31,6 @@ const loading = html`<div class="spinner-border" role="status">
 
 let latestQueryResult = [];
 let latestChart;
-let chatHistory = [];
 
 // --------------------------------------------------------------------
 // Set up Markdown
@@ -448,11 +447,10 @@ function notify(cls, title, message) {
   toast.show();
 }
 
-async function llm({ system, user, schema, format = false, data = [], streaming = true }) {
-  let errormessage = "";
+async function llm({ system, user, schema, format = false, streaming = true }) {
   let childnode = `<div class="card mb-3 chat-history"></div>`;
-  streaming ? $sql.insertAdjacentHTML("beforeend", childnode) : "";
-  streaming ? render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ):"";
+  if(streaming) $sql.insertAdjacentHTML("beforeend", childnode);
+  if(streaming) render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild );
   let currentChunk = "";
   try {
   for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
@@ -469,17 +467,14 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
         stream: true,
       }),
     },
-  )) {
-    if (data.error) {
-      throw new Error(data.error.message || "LLM API Error");
-    }
-    if (data.content) {
-      currentChunk = data.content;
-    }
-    streaming ? ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
+  )){
+    if (data.error) throw new Error(data.error.message || "LLM API Error");
+    if (data.content) currentChunk = data.content;
+    
+    if (streaming)  ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
               <strong>${ format ? "Result " : "Question: " } </strong> ${ format ? "" : user }
-            </div>
-            <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>`) : "";
+              <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>
+            </div>`);          
   }
   return currentChunk;
     } catch (e) {
@@ -561,6 +556,7 @@ IMPORTANT: ${$result.querySelector("#chart-input").value}
     }
   }
 });
+
 // --------------------------------------------------------------------
 // Function to download CSV file
 function download(content, filename, type) {
@@ -574,15 +570,15 @@ function download(content, filename, type) {
 }
 
 const queryhtml =  html`
-      <form class="mt-4 narrative mx-auto">
-        <div class="mb-3">
-          <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
-          <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
-        </div>
-        <div class="mb-3">
-          <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
-          <textarea class="form-control" name="query" id="query" rows="3"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Submit</button>
-      </form>
-    `;
+  <form class="mt-4 narrative mx-auto">
+    <div class="mb-3">
+      <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
+      <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
+    </div>
+    <div class="mb-3">
+      <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
+      <textarea class="form-control" name="query" id="query" rows="3"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Submit</button>
+  </form>
+  `;
