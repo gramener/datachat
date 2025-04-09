@@ -487,7 +487,7 @@ async function llm({ system, user, schema, format = false, streaming = true }) {
   return currentChunk;
   } catch (e) {
     return { error: e };
-  } 
+  }
 }
 
 // Utility function to render a table
