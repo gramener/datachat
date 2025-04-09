@@ -456,8 +456,8 @@ function notify(cls, title, message) {
 
 async function llm({ system, user, schema, format = false, streaming = true }) {
   let childnode = `<div class="card mb-3 chat-history"></div>`;
-  streaming ? $sql.insertAdjacentHTML("beforeend", childnode) : "";
-  streaming ? render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ):"";
+  if(streaming) $sql.insertAdjacentHTML("beforeend", childnode);
+  if(streaming) render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild );
   let currentChunk = "";
   try {
     for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
@@ -476,13 +476,12 @@ async function llm({ system, user, schema, format = false, streaming = true }) {
     },
   )){
     if (data.error) throw new Error(data.error.message || "LLM API Error");
-
     if (data.content) currentChunk = data.content;
     
-    streaming ? ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
+    if (streaming)  ($sql.lastElementChild.innerHTML = `<div class="card-header mb-2">
               <strong>${ format ? "Result " : "Question: " } </strong> ${ format ? "" : user }
               <div id="chat" class="mb-3 p-4"> ${marked.parse(currentChunk)}</div>
-            </div>`): "";          
+            </div>`);          
   }
   return currentChunk;
   } catch (e) {
