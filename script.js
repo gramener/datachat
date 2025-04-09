@@ -69,9 +69,9 @@ render(
         <div class="mb-3">
           <label for="file" class="form-label">Upload CSV (<code>.csv</code>) or SQLite databases (<code>.sqlite3</code>, <code>.db</code>)</label>
           <input class="form-control" type="file" id="file" name="file" accept=".csv,.sqlite3,.db,.sqlite,.s3db,.sl3" multiple />
-          </div>
+        </div>
       `
-      : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
+    : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
   $upload,
 );
 
@@ -318,18 +318,18 @@ async function drawTables() {
   `;
 
   const query = () => html`
-      <form class="mt-4 narrative mx-auto">
-        <div class="mb-3">
-          <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
-          <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
-        </div>
-        <div class="mb-3">
-          <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
-          <textarea class="form-control" name="query" id="query" rows="3"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Submit</button>
-      </form>
-    `;
+    <form class="mt-4 narrative mx-auto">
+      <div class="mb-3">
+        <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
+        <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
+      </div>
+      <div class="mb-3">
+        <label for="query" class="form-label fw-bold">Ask a question about your data:</label>
+        <textarea class="form-control" name="query" id="query" rows="3"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Submit</button>
+    </form>
+  `;
 
   render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, query()] : [])], $tablesContainer);
   if (!schema.length) return;
@@ -345,7 +345,7 @@ async function drawTables() {
         html`<div class="mx-auto narrative my-3">
           <h2 class="h6">Sample questions</h2>
           <ul>
-          ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
+            ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
           </ul>
         </div>`,
         query(),
@@ -460,7 +460,7 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
   streaming ? render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ):"";
   let currentChunk = "";
   try {
-  for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
+    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
       body: JSON.stringify({
@@ -474,7 +474,7 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
         stream: true,
       }),
     },
-  )) {
+  )){
     if (data.error) throw new Error(data.error.message || "LLM API Error");
 
     if (data.content) currentChunk = data.content;
@@ -485,9 +485,9 @@ async function llm({ system, user, schema, format = false, data = [], streaming 
             </div>`): "";          
   }
   return currentChunk;
-    } catch (e) {
-      return { error: e };
-    } 
+  }catch (e) {
+    return { error: e };
+  } 
 }
 
 // Utility function to render a table
