@@ -31,6 +31,7 @@ const loading = html`<div class="spinner-border" role="status">
 
 let latestQueryResult = [];
 let latestChart;
+let chatHistory = [];
 
 // --------------------------------------------------------------------
 // Set up Markdown
@@ -69,9 +70,9 @@ render(
         <div class="mb-3">
           <label for="file" class="form-label">Upload CSV (<code>.csv</code>) or SQLite databases (<code>.sqlite3</code>, <code>.db</code>)</label>
           <input class="form-control" type="file" id="file" name="file" accept=".csv,.sqlite3,.db,.sqlite,.s3db,.sl3" multiple />
-        </div>
+          </div>
       `
-    : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
+      : html`<a class="btn btn-primary" href="https://llmfoundry.straive.com/">Sign in to upload files</a>`,
   $upload,
 );
 
@@ -316,7 +317,7 @@ async function drawTables() {
       )}
     </div>
   `;
-  
+
   render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, queryhtml] : [])], $tablesContainer);
   if (!schema.length) return;
 
@@ -331,7 +332,7 @@ async function drawTables() {
         html`<div class="mx-auto narrative my-3">
           <h2 class="h6">Sample questions</h2>
           <ul>
-            ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
+          ${questions.map((q) => html`<li><a href="#" class="question">${q}</a></li>`)}
           </ul>
         </div>`,
         queryhtml,
@@ -361,9 +362,11 @@ async function handlesubmit (e) {
   e.preventDefault();
   const formData = new FormData(e.target);
   const query = formData.get("query");
+  document.getElementById("submit_query").remove();
   render(html``, $result);
-  const result = await llm({
-    system: `You are an expert SQLite query writer. The user has a SQLite dataset.
+  if (latestChart) latestChart.destroy();
+  render(html``, $chartCode);
+  const system = `You are an expert SQLite query writer. The user has a SQLite dataset.
 
 ${DB.context}
 
@@ -382,10 +385,11 @@ Answer the user's question following these steps:
 
 Replace generic filter values (e.g. "a location", "specific region", etc.) by querying a random value from data.
 Always use [Table].[Column].
-`,
-    user: query,
-  });
-
+`
+  !chatHistory.length ? chatHistory.push({role: "system", content: system}):"";
+  chatHistory.push({role: "user", content: query});
+  const result = await llm({system: system, user: query, chat: true});
+  chatHistory.push({role: "assistant", content: result});
   // Extract everything inside {lang?}...```
   const sql = result.match(/```.*?\n(.*?)```/s)?.[1] ?? result;
   try {
@@ -448,20 +452,19 @@ function notify(cls, title, message) {
   toast.show();
 }
 
-async function llm({ system, user, schema, format = false, streaming = true }) {
+async function llm({ system, user, schema, format = false, chat = false, streaming = true }) {
   let childnode = `<div class="card mb-3 chat-history"></div>`;
   if(streaming) $sql.insertAdjacentHTML("beforeend", childnode);
-  if(streaming) render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild );
+    if(streaming) render( html`<div class="text-center my-3">${loading}</div>`, $sql.lastElementChild ); 
   let currentChunk = "";
   try {
-    for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
+  for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions",{
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}:datachat` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
+        messages: chat ? chatHistory: [{ role: "system", content: system },
+          { role: "user", content: user }
         ],
         temperature: 0,
         ...(schema ? { response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema } } } : {}),
@@ -531,7 +534,7 @@ return new Chart(
 \`\`\`
 `;
     const user = `
-Question: ${$tablesContainer.querySelector('[name="query"]').value}
+Question: ${chatHistory}
 
 // First 3 rows of result
 data = ${JSON.stringify(latestQueryResult.slice(0, 3))}
@@ -571,7 +574,7 @@ function download(content, filename, type) {
 }
 
 const queryhtml =  html`
-  <form class="mt-4 narrative mx-auto">
+  <form id = "submit_query" class="mt-4 narrative mx-auto">
     <div class="mb-3">
       <label for="context" class="form-label fw-bold">Provide context about your dataset:</label>
       <textarea class="form-control" name="context" id="context" rows="3">${DB.context}</textarea>
