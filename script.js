@@ -316,6 +316,7 @@ async function drawTables() {
       )}
     </div>
   `;
+  
   render([tables, ...(schema.length ? [html`<div class="text-center my-3">${loading}</div>`, queryhtml] : [])], $tablesContainer);
   if (!schema.length) return;
 
